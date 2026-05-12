@@ -201,6 +201,34 @@ def construct_objaverse_mesh_path(data_path: Path, uid: str) -> Path:
     mesh_path = data_path / "assets" / uid / f"{uid}.glb"
 
     if not mesh_path.exists():
+        pkl_path = data_path / "assets" / uid / f"{uid}.pkl.gz"
+        if pkl_path.exists():
+            return pkl_path
         raise FileNotFoundError(f"Objaverse mesh not found: {mesh_path}")
 
     return mesh_path
+
+
+def load_objaverse_mesh_from_pkl(data_path: Path, uid: str) -> "trimesh.Trimesh":
+    """Load an Objaverse mesh from .pkl.gz file directly as a trimesh object.
+    Fallback for when .glb files are not available.
+    """
+    import gzip
+    import pickle
+
+    import numpy as np
+    import trimesh
+
+    pkl_path = data_path / "assets" / uid / f"{uid}.pkl.gz"
+    if not pkl_path.exists():
+        raise FileNotFoundError(f"Objaverse pkl not found: {pkl_path}")
+    with gzip.open(pkl_path, "rb") as f:
+        data = pickle.load(f)
+    # vertices is a list of {"x":..,"y":..,"z":..} dicts (Unity/Thor format)
+    verts_raw = data["vertices"]
+    vertices = np.array([[v["x"], v["y"], v["z"]] for v in verts_raw], dtype=np.float64)
+    # triangles is a flat list of ints; reshape into (N,3) faces
+    tris_raw = data["triangles"]
+    triangles = np.array(tris_raw, dtype=np.int64).reshape(-1, 3)
+    mesh = trimesh.Trimesh(vertices=vertices, faces=triangles, process=False)
+    return mesh

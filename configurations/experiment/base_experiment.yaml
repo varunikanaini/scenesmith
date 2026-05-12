@@ -14,10 +14,10 @@ csv_path: null
 # List of scene prompts.
 prompts: [
   "A bedroom with a bed, two nightstands, and a wardrobe in the corner of the room.",
-  "A living room with a two-seater sofa against the wall, a square rug in the middle in
-  front of the sofa, and two large plants on the floor near the sofa.",
-  "A classroom with six student desks, each with a chair. A teacher's desk sits at the
-  front near the chalkboard, which hangs on the wall."
+  # "A living room with a two-seater sofa against the wall, a square rug in the middle in
+  # front of the sofa, and two large plants on the floor near the sofa.",
+  # "A classroom with six student desks, each with a chair. A teacher's desk sits at the
+  # front near the chalkboard, which hangs on the wall."
 ]
 
 # Number of parallel workers; 1 = sequential for debugging
@@ -111,3 +111,21 @@ projection:
     time_step_s: 1.0e-3       # Physics time step (1ms).
     timeout_s: 600.0          # Max wall-clock time (10 minutes).
     save_html: false          # Save meshcat visualization HTML (for debugging).
+
+
+# Add this section to your config, or pass as CLI overrides
+furniture_agent:
+  asset_manager:
+    general_asset_source: objaverse
+
+wall_agent:
+  asset_manager:
+    general_asset_source: objaverse
+
+ceiling_agent:
+  asset_manager:
+    general_asset_source: objaverse
+
+manipuland_agent:
+  asset_manager:
+    general_asset_source: objaverse

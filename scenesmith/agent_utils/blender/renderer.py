@@ -307,6 +307,155 @@ class BlenderRenderer(
         bpy.context.scene.render.filepath = str(output_path)
         bpy.ops.render.render(write_still=True)
 
+    def render_video(
+        self,
+        params: "RenderParams",
+        output_path: Path,
+        num_frames: int = 120,
+        elevation_degrees: float = 30.0,
+        camera_distance_factor: float = 1.8,
+        fps: int = 30,
+        width: int = 1920,
+        height: int = 1080,
+        cycles_samples: int = 64,
+    ) -> None:
+        """Render an orbital video of the scene using Cycles raytracing.
+
+        Orbits the camera 360 degrees around the scene center, saves frames,
+        then assembles them into an mp4 via ffmpeg.
+
+        Args:
+            params: RenderParams used to load the scene/glTF.
+            output_path: Destination .mp4 file path.
+            num_frames: Total frames in the orbit (default 120 = 4s at 30fps).
+            elevation_degrees: Camera elevation above the scene midplane.
+            camera_distance_factor: Multiplier on scene bbox diagonal for distance.
+            fps: Output video framerate.
+            width: Render width in pixels.
+            height: Render height in pixels.
+            cycles_samples: Path-tracing samples per pixel (higher = better quality).
+        """
+        import math
+        import subprocess
+
+        # Set up scene.
+        self._setup_scene(params)
+        self._import_and_organize_gltf(params.scene)
+
+        scene = bpy.context.scene
+
+        # --- Switch to Cycles ---
+        scene.render.engine = "CYCLES"
+        scene.cycles.samples = cycles_samples
+        scene.cycles.use_denoising = True
+        scene.render.resolution_x = width
+        scene.render.resolution_y = height
+        scene.render.image_settings.file_format = "PNG"
+
+        # Enable GPU if available.
+        from scenesmith.agent_utils.blender.render_settings import (
+            setup_cycles_gpu_rendering,
+        )
+
+        setup_cycles_gpu_rendering()
+
+        # --- Compute scene bounding box center and radius ---
+        all_objs = [o for o in bpy.data.objects if o.type == "MESH"]
+        if not all_objs:
+            raise ValueError("No mesh objects found in scene for video render.")
+
+        xs = [
+            v
+            for o in all_objs
+            for v in [
+                o.matrix_world @ co
+                for co in [
+                    (
+                        bpy.data.meshes[o.data.name].vertices[i].co
+                        if o.data.name in bpy.data.meshes
+                        else Vector((0, 0, 0))
+                    )
+                    for i in range(len(o.data.vertices))
+                ]
+            ]
+        ]
+        # Simpler bbox via object bounds
+        mins, maxs = [], []
+        for o in all_objs:
+            corners = [o.matrix_world @ Vector(c) for c in o.bound_box]
+            mins.append(
+                Vector(
+                    (
+                        min(c.x for c in corners),
+                        min(c.y for c in corners),
+                        min(c.z for c in corners),
+                    )
+                )
+            )
+            maxs.append(
+                Vector(
+                    (
+                        max(c.x for c in corners),
+                        max(c.y for c in corners),
+                        max(c.z for c in corners),
+                    )
+                )
+            )
+
+        scene_min = Vector(
+            (min(v.x for v in mins), min(v.y for v in mins), min(v.z for v in mins))
+        )
+        scene_max = Vector(
+            (max(v.x for v in maxs), max(v.y for v in maxs), max(v.z for v in maxs))
+        )
+        center = (scene_min + scene_max) / 2.0
+        diagonal = (scene_max - scene_min).length
+        distance = diagonal * camera_distance_factor
+
+        elev_rad = math.radians(elevation_degrees)
+
+        # --- Camera ---
+        cam_data = bpy.data.cameras.new("VideoCamera")
+        cam_obj = bpy.data.objects.new("VideoCamera", cam_data)
+        scene.collection.objects.link(cam_obj)
+        scene.camera = cam_obj
+
+        # --- Render frames ---
+        frames_dir = Path(str(output_path).replace(".mp4", "_frames"))
+        frames_dir.mkdir(parents=True, exist_ok=True)
+
+        for i in range(num_frames):
+            azimuth = 2 * math.pi * i / num_frames
+            x = center.x + distance * math.cos(elev_rad) * math.cos(azimuth)
+            y = center.y + distance * math.cos(elev_rad) * math.sin(azimuth)
+            z = center.z + distance * math.sin(elev_rad)
+            cam_obj.location = Vector((x, y, z))
+            look_at_target(cam_obj, center)
+
+            frame_path = frames_dir / f"frame_{i:04d}.png"
+            scene.render.filepath = str(frame_path)
+            with suppress_stdout_stderr():
+                bpy.ops.render.render(write_still=True)
+
+        # --- Assemble with ffmpeg ---
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-framerate",
+            str(fps),
+            "-i",
+            str(frames_dir / "frame_%04d.png"),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-crf",
+            "18",
+            str(output_path),
+        ]
+        subprocess.run(cmd, check=True)
+        console_logger.info(f"Video saved to {output_path}")
+
     def render_multiview_for_analysis(
         self,
         mesh_path: Path,

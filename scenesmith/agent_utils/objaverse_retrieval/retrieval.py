@@ -105,6 +105,12 @@ class ObjaverseRetriever:
             data_path=self.config.data_path, uid=uid
         )
 
+        if str(mesh_path).endswith(".pkl.gz"):
+            from scenesmith.agent_utils.objaverse_retrieval.data_loader import (
+                load_objaverse_mesh_from_pkl,
+            )
+
+            return load_objaverse_mesh_from_pkl(self.config.data_path, uid)
         mesh = trimesh.load(mesh_path, force="mesh")
         if not isinstance(mesh, trimesh.Trimesh):
             raise ValueError(f"Loaded mesh is not a Trimesh: {type(mesh)}")
